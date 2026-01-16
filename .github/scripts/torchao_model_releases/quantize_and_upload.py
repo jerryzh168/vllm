@@ -20,6 +20,10 @@ from torchao._models._eval import TransformerEvalWrapper
 from torchao.prototype.awq import (
     AWQConfig,
 )
+from torchao.prototype.mx_formats.inference_workflow import (
+    MXDynamicActivationMXWeightConfig,
+    NVFP4DynamicActivationNVFP4WeightConfig,
+)
 from torchao.prototype.smoothquant import SmoothQuantConfig
 from torchao.quantization import (
     Float8DynamicActivationFloat8WeightConfig,
@@ -347,6 +351,31 @@ quantize_(model, quant_config)
 quantized_model = model
 quant_config = AWQConfig(base_config, step="prepare_for_loading")
 quantized_model.config.quantization_config = TorchAoConfig(quant_config)
+"""
+
+_mxfp8_quant_code = """
+from torchao.prototype.mx_formats.inference_workflow import MXDynamicActivationMXWeightConfig
+from torchao.quantization.quantize_.common import KernelPreference
+quant_config = MXDynamicActivationMXWeightConfig(
+    activation_dtype=torch.float8_e4m3fn,
+    weight_dtype=torch.float8_e4m3fn,
+    block_size=32,
+    kernel_preference=KernelPreference.AUTO,
+)
+quantization_config = TorchAoConfig(quant_type=quant_config)
+quantized_model = AutoModelForCausalLM.from_pretrained(model_to_quantize, device_map="cuda:0", torch_dtype=torch.bfloat16, quantization_config=quantization_config)
+tokenizer = AutoTokenizer.from_pretrained(model_id)
+"""
+
+_nvfp4_quant_code = """
+from torchao.prototype.mx_formats.inference_workflow import NVFP4DynamicActivationNVFP4WeightConfig
+quant_config = NVFP4DynamicActivationNVFP4WeightConfig(
+    use_triton_kernel=True,
+    use_dynamic_per_tensor_scale=True,
+)
+quantization_config = TorchAoConfig(quant_type=quant_config)
+quantized_model = AutoModelForCausalLM.from_pretrained(model_to_quantize, device_map="cuda:0", torch_dtype=torch.bfloat16, quantization_config=quantization_config)
+tokenizer = AutoTokenizer.from_pretrained(model_id)
 """
 
 
@@ -697,6 +726,15 @@ def quantize_and_upload(
             }
         ),
         "SmoothQuant-INT8-INT8": Int8DynamicActivationInt8WeightConfig(),
+        "MXFP8": MXDynamicActivationMXWeightConfig(
+            activation_dtype=torch.float8_e4m3fn,
+            weight_dtype=torch.float8_e4m3fn,
+            block_size=32,
+        ),
+        "NVFP4": NVFP4DynamicActivationNVFP4WeightConfig(
+            use_triton_kernel=True,
+            use_dynamic_per_tensor_scale=True,
+        ),
     }
 
     quant_to_quant_code = {
@@ -706,6 +744,8 @@ def quantize_and_upload(
         "INT8-INT4-HQQ": _int8_int4_hqq_quant_code,
         "AWQ-INT4": _awq_int4_quant_code,
         "SmoothQuant-INT8-INT8": _smoothquant_int8_int8_quant_code,
+        "MXFP8": _mxfp8_quant_code,
+        "NVFP4": _nvfp4_quant_code,
     }
 
     # preparation
@@ -925,7 +965,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--quant",
         type=str,
-        help="Quantization method. Options are FP8, INT4, INT8-INT4, INT8-INT4-HQQ, AWQ-INT4, SmoothQuant-INT8-INT8",
+        help="Quantization method. Options are FP8, INT4, INT8-INT4, INT8-INT4-HQQ, AWQ-INT4, SmoothQuant-INT8-INT8, MXFP8, NVFP4",
     )
     parser.add_argument(
         "--tasks",
